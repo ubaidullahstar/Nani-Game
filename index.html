@@ -178,11 +178,21 @@ var CONFIG={
   sounds:{
     start:'assets/audio/app_start.mp3',     /* plays when you press Play / Continue */
     correct:'assets/audio/correct.mp3',     /* right move: arrow escapes */
-    wrong:'assets/audio/wrong_move.mp3',    /* wrong move: arrow is blocked */
     win:'assets/audio/winning.mp3'          /* level complete */
   },
-  single:['start','wrong','win'],           /* long sounds: a new one stops the old one */
-  volume:{start:0.55,correct:0.8,wrong:1,win:0.9},   /* 0 to 1 per sound */
+  /* WRONG MOVE sounds: one of these is picked at random every time an arrow is blocked.
+     The same sound never plays twice in a row. Add or remove lines freely.
+     volume is 0 to 1. Files that are missing are skipped automatically. */
+  wrong:[
+    {src:'assets/audio/wrong_move.mp3',  volume:1},
+    {src:'assets/audio/wrong_audio1.mp3',volume:1},
+    {src:'assets/audio/wrong_audio2.mp3',volume:1},
+    {src:'assets/audio/wrong_audio3.mp3',volume:1},
+    {src:'assets/audio/wrong_audio4.mp3',volume:1}
+  ],
+  wrongMaxSeconds:4,                        /* a longer wrong sound fades out after this many seconds (0 = play fully) */
+  single:['start','win'],                   /* long sounds: a new one stops the old one */
+  volume:{start:0.55,correct:0.8,win:0.9},  /* 0 to 1 per sound */
   music:'assets/audio/bgm.mp3',             /* optional background loop (Music button on the menu) */
   musicVolume:0.3
 };
@@ -224,9 +234,46 @@ Object.keys(CONFIG.sounds).forEach(function(k){
   A[k]={a:a,bad:false};
   a.addEventListener('error',function(){A[k].bad=true});
 });
-function stopSfx(){CONFIG.single.forEach(function(k){try{A[k].a.pause();A[k].a.currentTime=0}catch(e){}})}
+/* random wrong-move sounds */
+var W=CONFIG.wrong.map(function(w){
+  var a=new Audio(w.src);a.preload='auto';
+  var o={a:a,bad:false,vol:w.volume==null?1:Math.max(0,Math.min(1,w.volume))};
+  a.addEventListener('error',function(){o.bad=true});
+  return o;
+});
+var lastWrong=-1,limitT=0,fadeT=0;
+function stopWrong(){
+  clearTimeout(limitT);clearInterval(fadeT);
+  W.forEach(function(o){try{o.a.pause();o.a.currentTime=0;o.a.volume=o.vol}catch(e){}});
+}
+function playWrong(){
+  var ok=[];W.forEach(function(o,i){if(!o.bad)ok.push(i)});
+  if(!ok.length){synth('wrong');return}
+  var pick=ok.length>1?ok.filter(function(i){return i!==lastWrong}):ok;
+  var i=pick[Math.floor(Math.random()*pick.length)];lastWrong=i;
+  stopWrong();
+  var o=W[i];
+  try{
+    o.a.volume=o.vol;
+    var p=o.a.play();if(p&&p.catch)p.catch(function(){synth('wrong')});
+    if(CONFIG.wrongMaxSeconds>0){
+      limitT=setTimeout(function(){
+        var n=0;
+        fadeT=setInterval(function(){
+          n++;o.a.volume=Math.max(0,o.vol*(1-n/8));
+          if(n>=8){clearInterval(fadeT);o.a.pause();o.a.currentTime=0;o.a.volume=o.vol}
+        },30);
+      },CONFIG.wrongMaxSeconds*1000);
+    }
+  }catch(e){synth('wrong')}
+}
+function stopSfx(){
+  stopWrong();
+  CONFIG.single.forEach(function(k){try{A[k].a.pause();A[k].a.currentTime=0}catch(e){}});
+}
 function sfx(k){
   if(!S.sfx)return;
+  if(k==='wrong'){playWrong();return}
   var o=A[k],v=CONFIG.volume[k]!=null?CONFIG.volume[k]:0.8;
   if(o&&!o.bad){
     try{
